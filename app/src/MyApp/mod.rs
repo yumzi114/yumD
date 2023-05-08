@@ -1,6 +1,9 @@
 use super::MyInfo;
 use eframe::{egui};
-use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response};
+use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
+
+
+const BLUE: Color32 = Color32::from_rgb(123, 180, 255);
 pub struct  MyApp{
     pub(crate) date: bool,
     pub(crate) has_next: bool,
@@ -16,17 +19,17 @@ impl MyApp{
             page_line: 10 
         }
     }
+    
     pub fn render_sys(&mut self, ui: &mut Ui){
         let my_system = MyInfo::MyInfo::new();
         ui.heading("Check System Files");
-        
         ui.horizontal_wrapped(|ui|{
             for i in my_system.list{
                 ui.label(i.menu().as_str());
                 if i.used {
                     ui.label(RichText::new("Used").color(Color32::from_rgb(110, 255, 110)));
                     let btn = ui.small_button(RichText::new("📋").size(15.))
-                            .on_hover_text("copy path");
+                        .on_hover_text("copy path");
                     if btn.clicked(){
                         ui.output_mut(|o| o.copied_text = i.path.into());
                     }
@@ -69,6 +72,17 @@ impl MyApp{
                 ui.label("page line : ");
                 ui.add(egui::DragValue::new(&mut self.page_line));
                 if ui.button(RichText::new("🔁").size(15.)).clicked(){};
+            });
+            ui.add_space(5.0);
+            ui.separator();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let temp = api::get_articles().expect("dd");
+                ui.vertical_centered(|ui| {
+                    for i in temp.articles{
+                        ui.colored_label(BLUE,i.title );
+                    }
+                    
+                });
             });
         });
     }
