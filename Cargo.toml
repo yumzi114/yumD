@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "app","api",
+] 
+default-members = ["app"]
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+authors = ["yum <yumzi114@gmail.com>"]
+readme = "README.md"
+homepage = "https://ityumhouse.com/"
+repository = "https://github.com/yumzi114/yumD/"
+license = "MIT OR Apache-2.0"
