@@ -31,12 +31,10 @@ impl  eframe::App for MyApp::MyApp{
 
 fn main()->Result<(),eframe::Error>{
     env_logger::init();
-    println!("Hello, world!");
     let option = eframe::NativeOptions{
         decorated:false,
         transparent:true,
         resizable:true,
-        
         min_window_size: Some(egui::vec2(400.1, 100.0)),
         initial_window_size: Some(egui::vec2(400.0, 240.0)),
         ..Default::default()
