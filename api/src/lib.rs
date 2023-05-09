@@ -7,7 +7,11 @@ extern crate dotenv;
 use dotenv::dotenv;
 
 
-const BASE_URL: &str = "https://newsapi.org/v2/top-headlines?";
+static APP_USER_AGENT: &str = concat!(
+    env!("CARGO_PKG_NAME"),
+    "/",
+    env!("CARGO_PKG_VERSION"),
+);
 #[derive(Deserialize, Debug)]
 pub struct NewsAPIResponse {
     status: String,
@@ -37,6 +41,54 @@ enum Country {
     Kr,
     Us
 }
+pub struct NewsApi{
+    base_url:String,
+    Country:String,
+    total_page:String,
+    current_page:String,
+}
+impl NewsApi{
+    pub fn new(country:&str, total_page:u32,current_page:u32) -> NewsApi{
+        NewsApi { 
+            base_url:"https://newsapi.org/v2".to_string(),
+            Country: country.to_string(), 
+            total_page: total_page.to_string(), 
+            current_page: current_page.to_string(),
+        }
+    }
+    pub fn update(&mut self,country:&str, total_page:u32,current_page:u32){
+        self.Country=country.to_string();
+        self.total_page=total_page.to_string();
+        self.current_page=current_page.to_string();
+    }
+    #[tokio::main]
+    pub async fn get_api(&self,api_key:String)-> Result<NewsAPIResponse, ApiError>{
+        // let api_key = dotenv::var("APIKEY").map_err(|e|ApiError::ApiError(e))?;
+        let params = [
+            ("country", self.Country.as_str()), 
+            ("sortBy", "popularity"), 
+            ("pageSize", self.total_page.as_str()), 
+            ("page", self.current_page.as_str())];
+        let mut url = Url::parse(&self.base_url)?;
+        url.path_segments_mut()
+        .unwrap()
+        .push("top-headlines");
+        let client = reqwest::Client::new();
+        let resp = client
+            .request(reqwest::Method::GET, url)
+            .query(&params)
+            .header("User-Agent", APP_USER_AGENT)
+            .header("Authorization",api_key)
+            .build()
+            .map_err(|e| ApiError::AsyncRequestFailed(e))?;
+        let response = client    
+            .execute(resp)
+            .await.unwrap()
+            .json::<NewsAPIResponse>()
+            .await.map_err(|e| ApiError::AsyncRequestFailed(e))?;
+        Ok(response)
+    }
+}
 #[derive(thiserror::Error, Debug)]
 pub enum ApiError{
     #[error("Fail fetching article")]
@@ -60,48 +112,4 @@ impl ToString for Country {
         }
     }
 }
-pub fn get_articles()->Result<Articles,ApiError>{
-    dotenv().ok();
-    let api_key = dotenv::var("APIKEY").map_err(|e|ApiError::ApiError(e))?;
-    let url = "https://newsapi.org/v2/";
-    let response = ureq::get(url).call().map_err(|e|ApiError::RequestFailed(e))
-    ?.into_string().map_err(|e|ApiError::FailedResponseToString(e))?;
-    let articles:Articles =  serde_json::from_str(&response).map_err(|e|ApiError::ArticleParsingFail(e))?;
-    Ok(articles)
-    // dbg!(articles);
-    // todo!()
-}
-// static APP_USER_AGENT: &str = concat!(
-//     env!("CARGO_PKG_NAME"),
-//     "/",
-//     env!("CARGO_PKG_VERSION"),
-// );
-#[tokio::main]
-pub async fn get_articless() -> Result<NewsAPIResponse, ApiError> {
-    dotenv().ok();
-    let api_key = dotenv::var("APIKEY").map_err(|e|ApiError::ApiError(e))?;
-    let params = [("country", "kr"), ("sortBy", "popularity"), ("pageSize", "20"), ("page", "1")];
-    let client = reqwest::Client::new();
-    let mut url = Url::parse("https://newsapi.org/v2")?;
-    url.path_segments_mut()
-    .unwrap()
-    .push("top-headlines");
-    
-    let resp = client
-        .request(reqwest::Method::GET, url)
-        .query(&params)
-        .header("User-Agent", "yumD")
-        .header("Authorization",&api_key)
-        .build()
-        .map_err(|e| ApiError::AsyncRequestFailed(e))?;
-    
-    let response = client    
-        .execute(resp)
-        .await.unwrap()
-        .json::<NewsAPIResponse>()
-        .await.map_err(|e| ApiError::AsyncRequestFailed(e))?;
-        
-    Ok(response)
-    // println!("{:#?}", response);
-    // Ok(())
-}
+

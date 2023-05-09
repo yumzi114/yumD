@@ -2,27 +2,83 @@ use super::MyInfo;
 use eframe::{egui};
 use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
 
+use serde_derive::{Serialize, Deserialize};
+
 
 const BLUE: Color32 = Color32::from_rgb(123, 180, 255);
+const GREEN: Color32 = Color32::from_rgb(110, 255, 110);
 pub struct  MyApp{
     pub(crate) date: bool,
-    pub(crate) has_next: bool,
-    pub(crate) current_page: u32,
-    pub(crate) page_line: u32,
+    pub has_next: bool,
+    open_win_name:String,
+    pub articles: Vec<NewsCardData>,
+    news_config:NewsConfig,
+    api_used:bool
 }
-impl MyApp{
-    pub fn new() -> MyApp {
-        MyApp { 
-            date: false, 
-            has_next: false, 
-            current_page: 1, 
-            page_line: 10 
+#[derive(Serialize, Deserialize,Default)]
+pub struct NewsConfig{
+    api_key:String,
+    current_page: u32,
+    page_line: u32,
+}
+
+impl  NewsConfig{
+    fn new()->Self{
+        Self { 
+            current_page: Default::default(),
+            page_line: Default::default(),
+            api_key: String::new() 
         }
     }
+}
+
+pub struct NewsCardData {
+    title: String,
+    url:String,
+    publishedAt:String
+}
+impl MyApp{
+    pub fn new(cc: &eframe::CreationContext<'_>) -> MyApp {
+        setup_custom_fonts(&cc.egui_ctx);
+        let config: NewsConfig = confy::load("yumd", "api_key").unwrap_or_default();
+        // let iter = (0..20).map(|a| NewsCardData {
+        //     title: format!("title{}", a),
+        // });
+        MyApp { 
+            date: false, 
+            has_next: false,
+            api_used:!&config.api_key.is_empty(),
+            open_win_name:"None".to_string(), 
+            articles: {Self::fech_news("kr")},
+            news_config:config,
+            
+            
+            
+        }
+    }
+    pub fn fech_news(country:&str)->Vec<NewsCardData>{
+        let config:NewsConfig = confy::load("yumd", "api_key").unwrap_or_default();
+        let mut list = Vec::new();
+        // let key = std::string::String::from(config.api_key);
+        if let Ok(response) = api::NewsApi::new(country, config.page_line, config.current_page).get_api(config.api_key){
+            let articles = response.articles();
+            for a in articles.iter(){
+                let (first,last) = a.publishedAt.split_at(10);
+                let news = NewsCardData{
+                    title: a.title.to_string(),
+                    url:a.url.to_string(),
+                    publishedAt:first.to_string()
+                };
+                list.push(news) 
+            }
+        };
+        list
+    }
     
-    pub fn render_sys(&mut self, ui: &mut Ui){
+    pub fn render_sys(&mut self, ui: &mut Ui,ctx: &egui::Context){
         let my_system = MyInfo::MyInfo::new();
         ui.heading("Check System Files");
+        self.new_windows(ctx);
         ui.horizontal_wrapped(|ui|{
             for i in my_system.list{
                 ui.label(i.menu().as_str());
@@ -36,11 +92,8 @@ impl MyApp{
                     let winbtn = ui.small_button(RichText::new("📑").size(15.))
                             .on_hover_text("show code");
                     if winbtn.clicked(){
-                        let temp = egui::Window::new("My Window").id(i.sysname.into()).open(&mut self.has_next);
-                        // let temp = egui::Window::new("My Window").id("ttt".into()).open(&mut self.has_next);
-                        temp.show(ui.ctx(), |ui| {
-                            ui.label("Hello World!");
-                        });
+                        self.has_next=!self.has_next;
+                        self.open_win_name=i.sysname;
                     }
                 }else {
                     ui.label(RichText::new("Undefined").color(Color32::from_rgb(244, 4, 4)));
@@ -49,6 +102,8 @@ impl MyApp{
         });
     }
     pub fn news_menu(&mut self, ui: &mut Ui){
+        let mut newsapi = api::NewsApi::new("kr", self.news_config.page_line, self.news_config.current_page);
+        // let article =newsapi.get_api().unwrap();
         let mut news_view = collaps_head("news",ui);
         let news_header_res = collaps_head_respone(ui,&mut news_view,"show!");
         news_view.show_body_indented(&news_header_res.response, ui, |ui|{
@@ -60,31 +115,75 @@ impl MyApp{
                     ui.label("dd");
                     // ui.add(DatePicker::new("datetime",&mut local));
                 };
-                if ui.small_button(RichText::new("◀️").size(15.)).clicked(){
-                    if self.current_page!=1{
-                        self.current_page -=1;
+                if ui.small_button(RichText::new("➖").size(15.)).clicked(){
+                    if self.news_config.current_page!=1{
+                        self.news_config.current_page -=1;
                     };
                 };
-                ui.add(egui::DragValue::new(&mut self.current_page).speed(1.0));
-                if ui.small_button(RichText::new("▶️").size(15.)).clicked(){
-                    self.current_page +=1;
+                ui.add(egui::DragValue::new(&mut self.news_config.current_page).speed(1.0));
+                if ui.small_button(RichText::new("➕").size(15.)).clicked(){
+                    self.news_config.current_page +=1;
                 };
                 ui.label("page line : ");
-                ui.add(egui::DragValue::new(&mut self.page_line));
-                if ui.button(RichText::new("🔁").size(15.)).clicked(){};
+                ui.add(egui::DragValue::new(&mut self.news_config.page_line));
+                if ui.button(RichText::new("🔁").size(15.)).clicked(){
+                    newsapi.update("kr", self.news_config.page_line, self.news_config.current_page);
+                };
             });
-            ui.add_space(5.0);
-            ui.separator();
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let temp = api::get_articles().expect("dd");
-                ui.vertical_centered(|ui| {
-                    for i in temp.articles{
-                        ui.colored_label(BLUE,i.title );
-                    }
-                    
+            if self.api_used{
+                ui.add_space(5.0);
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for i in &self.articles{
+                        ui.horizontal_wrapped(|ui|{
+                            ui.hyperlink_to(i.title.as_str(), i.url.as_str());
+                            ui.colored_label(GREEN,i.publishedAt.as_str());
+                        });
+                        
+                    };
+                    // ui.vertical_centered(|ui| {
+                        
+                    // });
                 });
-            });
+            }else {
+                ui.horizontal_wrapped(|ui|{
+                    ui.label("API KEY");
+                    let text_input=ui.text_edit_singleline(&mut self.news_config.api_key);
+                    if text_input.lost_focus()&&ui.input(|i| i.key_pressed(egui::Key::Enter)){
+                        if let Err(e)=confy::store("yumD", "api_key", NewsConfig{
+                            current_page:1,
+                            page_line:20,
+                            api_key:self.news_config.api_key.to_string()
+                        }){
+                            tracing::error!("Failed saving app state:{}",e);
+                        }
+                        // self.api_used=true;
+                        tracing::error!("api key set");
+                    }
+                });
+            };
+            
+            // match article {
+            //     Ok(article)=>{
+            //         
+            //     }
+            //     Err(e)=>{
+            //         egui::ScrollArea::vertical().show(ui, |ui| {
+            //             ui.vertical_centered(|ui| {
+            //                 ui.colored_label(BLUE,e.to_string() );
+            //             });
+            //         });
+            //     }
+            // }
+            
         });
+    }
+    pub fn new_windows(&mut self, ctx: &egui::Context){
+        let temp = egui::Window::new("My Window").id("ff".into()).open(&mut self.has_next);
+            // let temp = egui::Window::new("My Window").id("ttt".into()).open(&mut self.has_next);
+            temp.show(ctx, |ui| {
+                ui.label(self.open_win_name.as_str());
+            });
     }
     pub fn db_menu(&mut self, ui: &mut Ui){
         let mut db_view = collaps_head("dbv",ui);
@@ -125,9 +224,6 @@ impl MyApp{
 }
 
 
-
-
-
 fn circle_icon(ui: &mut Ui, openness: f32, response: &Response) {
     let stroke = ui.style().interact(&response).fg_stroke;
     let radius = egui::lerp(6.0..=8.0, openness);
@@ -147,4 +243,34 @@ fn collaps_head_respone(ui: &mut egui::Ui,statename:&mut CollapsingState,lable:&
         statename.show_toggle_button(ui, circle_icon);
     });
     respone
+}
+fn setup_custom_fonts(ctx: &egui::Context) {
+    // Start with the default fonts (we will be adding to them rather than replacing them).
+    let mut fonts = egui::FontDefinitions::default();
+
+    // Install my own font (maybe supporting non-latin characters).
+    // .ttf and .otf files supported.
+    fonts.font_data.insert(
+        "my_font".to_owned(),
+        egui::FontData::from_static(include_bytes!(
+            "../../../koryungddal.ttf"
+        )),
+    );
+
+    // Put my font first (highest priority) for proportional text:
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "my_font".to_owned());
+
+    // Put my font as last fallback for monospace:
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .push("my_font".to_owned());
+
+    // Tell egui to use these fonts:
+    ctx.set_fonts(fonts);
 }
