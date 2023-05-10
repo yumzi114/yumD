@@ -1,25 +1,32 @@
 use super::MyInfo;
 use eframe::{egui};
 use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
-
+// use std::{sync::mpsc::channel, thread};
 use serde_derive::{Serialize, Deserialize};
-
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 const BLUE: Color32 = Color32::from_rgb(123, 180, 255);
 const GREEN: Color32 = Color32::from_rgb(110, 255, 110);
 pub struct  MyApp{
-    pub(crate) date: bool,
-    pub has_next: bool,
+    pub (crate) date: bool,
+    has_next: bool,
     open_win_name:String,
+    open_win_code:String,
     pub articles: Vec<NewsCardData>,
     news_config:NewsConfig,
-    api_used:bool
+    api_used:bool,
+    totalResults:u32,
+    pub field: Arc<Mutex<i128>>,
 }
 #[derive(Serialize, Deserialize,Default)]
 pub struct NewsConfig{
-    api_key:String,
-    current_page: u32,
-    page_line: u32,
+    pub api_key:String,
+    pub current_page: u32,
+    pub page_line: u32,
 }
 
 impl  NewsConfig{
@@ -33,14 +40,14 @@ impl  NewsConfig{
 }
 
 pub struct NewsCardData {
-    title: String,
-    url:String,
-    publishedAt:String
+    pub title: String,
+    pub url:String,
+    pub publishedAt:String
 }
 impl MyApp{
     pub fn new(cc: &eframe::CreationContext<'_>) -> MyApp {
         setup_custom_fonts(&cc.egui_ctx);
-        let config: NewsConfig = confy::load("yumd", "api_key").unwrap_or_default();
+        let config: NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
         // let iter = (0..20).map(|a| NewsCardData {
         //     title: format!("title{}", a),
         // });
@@ -48,19 +55,34 @@ impl MyApp{
             date: false, 
             has_next: false,
             api_used:!&config.api_key.is_empty(),
-            open_win_name:"None".to_string(), 
-            articles: {Self::fech_news("kr")},
+            open_win_name:"None".to_string(),
+            open_win_code:String::new(), 
+            articles: vec![],
             news_config:config,
-            
-            
-            
+            totalResults:0,
+            field: Arc::new(Mutex::new(0))    
         }
     }
-    pub fn fech_news(country:&str)->Vec<NewsCardData>{
-        let config:NewsConfig = confy::load("yumd", "api_key").unwrap_or_default();
-        let mut list = Vec::new();
-        // let key = std::string::String::from(config.api_key);
-        if let Ok(response) = api::NewsApi::new(country, config.page_line, config.current_page).get_api(config.api_key){
+    pub fn fech_news(&mut self){
+            let config:NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
+            if let Ok(response) = api::NewsApi::new("kr", config.page_line, config.current_page).get_api(config.api_key){
+                self.totalResults=response.totalResults;
+                let articles = response.articles();
+                for a in articles.iter(){
+                    let (first,last) = a.publishedAt.split_at(10);
+                    let news = NewsCardData{
+                        title: a.title.to_string(),
+                        url:a.url.to_string(),
+                        publishedAt:first.to_string()
+                    };
+                    self.articles.push(news);
+                }
+            };
+    }
+    fn fech_newsupdate(&mut self){
+        self.articles.clear();
+        if let Ok(response) = api::NewsApi::new("kr", self.news_config.page_line, self.news_config.current_page).get_api(self.news_config.api_key.to_string()){
+            self.totalResults=response.totalResults;
             let articles = response.articles();
             for a in articles.iter(){
                 let (first,last) = a.publishedAt.split_at(10);
@@ -69,10 +91,9 @@ impl MyApp{
                     url:a.url.to_string(),
                     publishedAt:first.to_string()
                 };
-                list.push(news) 
-            }
+                self.articles.push(news);
         };
-        list
+        }
     }
     
     pub fn render_sys(&mut self, ui: &mut Ui,ctx: &egui::Context){
@@ -94,15 +115,20 @@ impl MyApp{
                     if winbtn.clicked(){
                         self.has_next=!self.has_next;
                         self.open_win_name=i.sysname;
+                        self.open_win_code=i.code;
                     }
                 }else {
                     ui.label(RichText::new("Undefined").color(Color32::from_rgb(244, 4, 4)));
                 }
             }
         });
+        ui.horizontal_wrapped(|ui|{
+            ui.label("Second Thread Working time : ");
+            ui.colored_label(GREEN,format!("{}",self.field.lock().unwrap()));
+        });
     }
     pub fn news_menu(&mut self, ui: &mut Ui){
-        let mut newsapi = api::NewsApi::new("kr", self.news_config.page_line, self.news_config.current_page);
+        // let mut newsapi = api::NewsApi::new("kr", self.news_config.page_line, self.news_config.current_page);
         // let article =newsapi.get_api().unwrap();
         let mut news_view = collaps_head("news",ui);
         let news_header_res = collaps_head_respone(ui,&mut news_view,"show!");
@@ -118,17 +144,23 @@ impl MyApp{
                 if ui.small_button(RichText::new("➖").size(15.)).clicked(){
                     if self.news_config.current_page!=1{
                         self.news_config.current_page -=1;
+                        self.fech_newsupdate();
                     };
                 };
                 ui.add(egui::DragValue::new(&mut self.news_config.current_page).speed(1.0));
                 if ui.small_button(RichText::new("➕").size(15.)).clicked(){
                     self.news_config.current_page +=1;
+                    self.fech_newsupdate();
                 };
                 ui.label("page line : ");
                 ui.add(egui::DragValue::new(&mut self.news_config.page_line));
                 if ui.button(RichText::new("🔁").size(15.)).clicked(){
-                    newsapi.update("kr", self.news_config.page_line, self.news_config.current_page);
+                    self.fech_newsupdate();
+                    // newsapi.update("kr", self.news_config.page_line, self.news_config.current_page);
                 };
+                ui.label("Total : ");
+                ui.label(self.totalResults.to_string());
+                
             });
             if self.api_used{
                 ui.add_space(5.0);
@@ -139,7 +171,6 @@ impl MyApp{
                             ui.hyperlink_to(i.title.as_str(), i.url.as_str());
                             ui.colored_label(GREEN,i.publishedAt.as_str());
                         });
-                        
                     };
                     // ui.vertical_centered(|ui| {
                         
@@ -150,7 +181,7 @@ impl MyApp{
                     ui.label("API KEY");
                     let text_input=ui.text_edit_singleline(&mut self.news_config.api_key);
                     if text_input.lost_focus()&&ui.input(|i| i.key_pressed(egui::Key::Enter)){
-                        if let Err(e)=confy::store("yumD", "api_key", NewsConfig{
+                        if let Err(e)=confy::store("yumD", "yumdconfig", NewsConfig{
                             current_page:1,
                             page_line:20,
                             api_key:self.news_config.api_key.to_string()
@@ -162,26 +193,14 @@ impl MyApp{
                     }
                 });
             };
-            
-            // match article {
-            //     Ok(article)=>{
-            //         
-            //     }
-            //     Err(e)=>{
-            //         egui::ScrollArea::vertical().show(ui, |ui| {
-            //             ui.vertical_centered(|ui| {
-            //                 ui.colored_label(BLUE,e.to_string() );
-            //             });
-            //         });
-            //     }
-            // }
-            
         });
     }
     pub fn new_windows(&mut self, ctx: &egui::Context){
-        let temp = egui::Window::new("My Window").id("ff".into()).open(&mut self.has_next);
+        let mut temp = egui::Window::new("Code View").id("code".into()).open(&mut self.has_next).vscroll(true);
             // let temp = egui::Window::new("My Window").id("ttt".into()).open(&mut self.has_next);
             temp.show(ctx, |ui| {
+                ui.max_rect();
+                ui.code_editor(&mut self.open_win_code);
                 ui.label(self.open_win_name.as_str());
             });
     }

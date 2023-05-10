@@ -1,5 +1,6 @@
 
-use std::{path::{Path, PathBuf}, ops::Add};
+use std::{fs,path::{Path, PathBuf}, ops::Add};
+
 pub struct MyInfo{
     pub list : Vec<System>,
     
@@ -8,6 +9,7 @@ pub struct System{
     pub sysname:String,
     pub used:bool,
     pub path:String,
+    pub code:String,
     opendoc:bool,
 }
 impl System{
@@ -16,6 +18,7 @@ impl System{
             sysname:sysname.to_string(),
             used:Path::new(filepath).is_file(),
             path:filepath.to_string(),
+            code:fs::read_to_string(filepath).unwrap_or_default(),
             opendoc:true,
         }
     }

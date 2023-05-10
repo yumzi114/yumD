@@ -15,6 +15,7 @@ static APP_USER_AGENT: &str = concat!(
 #[derive(Deserialize, Debug)]
 pub struct NewsAPIResponse {
     status: String,
+    pub totalResults:u32,
     articles: Vec<Article>,
     code: Option<String>,
 }
