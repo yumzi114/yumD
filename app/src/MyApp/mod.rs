@@ -1,5 +1,5 @@
 use super::MyInfo;
-use eframe::{egui};
+use eframe::{egui::{self, Label, Sense}};
 use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
 // use std::{sync::mpsc::channel, thread};
 use serde_derive::{Serialize, Deserialize};
@@ -13,11 +13,15 @@ const BLUE: Color32 = Color32::from_rgb(123, 180, 255);
 const GREEN: Color32 = Color32::from_rgb(110, 255, 110);
 pub struct  MyApp{
     pub (crate) date: bool,
+    setting_menu_open:bool,
+    on_setting_menu:OpenSetting,
     has_next: bool,
     open_win_name:String,
     open_win_code:String,
     pub articles: Vec<NewsCardData>,
     news_config:NewsConfig,
+    youtube_config:YoutubeConfig,
+    twitch_config:TwitchConfig,
     api_used:bool,
     totalResults:u32,
     pub field: Arc<Mutex<i128>>,
@@ -28,7 +32,16 @@ pub struct NewsConfig{
     pub current_page: u32,
     pub page_line: u32,
 }
-
+#[derive(Serialize, Deserialize,Default)]
+struct TwitchConfig{
+    id:String,
+    password:String
+}
+#[derive(Serialize, Deserialize,Default)]
+struct YoutubeConfig{
+    id:String,
+    password:String
+}
 impl  NewsConfig{
     fn new()->Self{
         Self { 
@@ -37,6 +50,26 @@ impl  NewsConfig{
             api_key: String::new() 
         }
     }
+}
+impl  TwitchConfig{
+    fn new()->Self{
+        Self { 
+            id: String::new(),
+            password: String::new() 
+        }
+    }
+}
+impl  YoutubeConfig{
+    fn new()->Self{
+        Self { 
+            id: String::new(),
+            password: String::new() 
+        }
+    }
+}
+enum OpenSetting{
+    twitch,
+    youtube,
 }
 
 pub struct NewsCardData {
@@ -53,6 +86,8 @@ impl MyApp{
         // });
         MyApp { 
             date: false, 
+            setting_menu_open:false,
+            on_setting_menu:OpenSetting::twitch,
             has_next: false,
             api_used:!&config.api_key.is_empty(),
             open_win_name:"None".to_string(),
@@ -60,6 +95,9 @@ impl MyApp{
             articles: vec![],
             news_config:config,
             totalResults:0,
+            youtube_config:YoutubeConfig::new(),
+            twitch_config:TwitchConfig::new(),
+            
             field: Arc::new(Mutex::new(0))    
         }
     }
@@ -100,6 +138,7 @@ impl MyApp{
         let my_system = MyInfo::MyInfo::new();
         ui.heading("Check System Files");
         self.new_windows(ctx);
+        self.setting_menu(ctx);
         ui.horizontal_wrapped(|ui|{
             for i in my_system.list{
                 ui.label(i.menu().as_str());
@@ -196,7 +235,7 @@ impl MyApp{
         });
     }
     pub fn new_windows(&mut self, ctx: &egui::Context){
-        let mut temp = egui::Window::new("Code View").id("code".into()).open(&mut self.has_next).vscroll(true);
+        let temp = egui::Window::new("Code View").id("code".into()).open(&mut self.has_next).vscroll(true);
             // let temp = egui::Window::new("My Window").id("ttt".into()).open(&mut self.has_next);
             temp.show(ctx, |ui| {
                 ui.max_rect();
@@ -204,33 +243,81 @@ impl MyApp{
                 ui.label(self.open_win_name.as_str());
             });
     }
-    pub fn db_menu(&mut self, ui: &mut Ui){
+    fn setting_menu(&mut self, ctx: &egui::Context){
+        match &self.on_setting_menu {
+            OpenSetting::twitch=>{
+                let menu = egui::Window::new("Twitch Settings").id("settingmenu".into()).open(&mut self.setting_menu_open);
+                menu.show(ctx, |ui|{
+                    ui.max_rect();
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("ID                      : ");
+                        ui.text_edit_singleline(&mut self.twitch_config.id);
+                    });
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("PASSWORD : ");
+                        // password::text_edit_singleline(&mut self.twitch_config.password);
+                        let psw = egui::TextEdit::singleline(&mut self.twitch_config.password).password(true).show(ui);
+                    });
+                    ui.vertical_centered(|ui|{
+                        if ui.button("OK").clicked(){
+                            if let Err(e)=confy::store("yumD", "TwitchConfig", TwitchConfig{
+                                id:self.twitch_config.id.to_string(),
+                                password:self.twitch_config.password.to_string()
+                            }){
+                                tracing::error!("Failed saving Twitch:{}",e);
+                            }
+                        };
+                    });
+                    
+                });
+            },
+            OpenSetting::youtube=>{
+                let menu = egui::Window::new("Youtube Settings").id("settingmenu".into()).open(&mut self.setting_menu_open);
+                menu.show(ctx, |ui|{
+                    ui.max_rect();
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("ID                      : ");
+                        ui.text_edit_singleline(&mut self.youtube_config.id);
+                    });
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("PASSWORD : ");
+                        let psw = egui::TextEdit::singleline(&mut self.youtube_config.password).password(true).show(ui);
+                        // ui.text_edit_singleline(&mut self.youtube_config.password);
+                        
+                    });
+                });
+            },
+            _=>self.setting_menu_open=false
+        };
+        
+    }
+    pub fn db_menu(&mut self, ui: &mut Ui,){
+        let mut connetc=false;
         let mut db_view = collaps_head("dbv",ui);
         let db_header_res = collaps_head_respone(ui,&mut db_view,"show!");
         db_view.show_body_indented(&db_header_res.response, ui, |ui| {
-            ui.label("Body");
-            let mut temp = "// A very simple example\n\
-            fn main() {\n\
-            \tprintln!(\"Hello world!\");\n\
-            }\n\
-            ";
-            ui.add(
-                egui::TextEdit::multiline(&mut temp).lock_focus(true)
-                .desired_width(f32::INFINITY)
-                .font(egui::TextStyle::Monospace)
-                .desired_rows(10)
-                .code_editor());
-            ui.code("syntax_highlighting");
-            // ui.text_edit_multiline(&mut temp);
-            ui.label("Body");
+            if ui.button("connect setting").clicked(){
+                
+            }
         }
         );
     }
-    pub fn stream_menu(&mut self, ui: &mut Ui){
+    pub fn stream_menu(&mut self, ctx: &egui::Context, ui: &mut Ui){
         let mut stream_view = collaps_head("stream",ui);
         let stream_header_res = collaps_head_respone(ui,&mut stream_view,"show!");
-        stream_view.show_body_indented(&stream_header_res.response, ui, |ui| 
-            ui.label("Body")
+        stream_view.show_body_indented(&stream_header_res.response, ui, |ui|{
+            ui.horizontal_wrapped(|ui|{
+                if ui.add(Label::new("Twitch").sense(Sense::click())).clicked() {
+                    self.on_setting_menu=OpenSetting::twitch;
+                    self.setting_menu_open=!self.setting_menu_open;
+                };
+                if ui.add(Label::new("Youtube").sense(Sense::click())).clicked() {
+                    self.on_setting_menu=OpenSetting::youtube;
+                    self.setting_menu_open=!self.setting_menu_open;
+                };
+                ui.label("(login api settings)");
+            });            
+        }
         );
     }
     pub fn video_menu(&mut self, ui: &mut Ui){

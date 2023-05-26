@@ -4,9 +4,7 @@ mod window_frame;
 use eframe::{egui};
 use MyApp::NewsCardData;
 use std::{thread,time::Duration,};
-
-
-
+use db_manager::*;
 impl  eframe::App for MyApp::MyApp{
     
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -18,17 +16,19 @@ impl  eframe::App for MyApp::MyApp{
             self.render_sys(ui,ctx);
             ui.separator();
             ui.heading("Show Today News Headlines");
-            self.news_menu(ui);
-            ui.separator();
-            ui.heading("Postgresql DB View And Migration");
-            self.db_menu(ui);
-            ui.separator();
-            ui.heading("Stream Video View");
-            self.stream_menu(ui);
-            ui.separator();
-            ui.heading("URL Video Down and View");
-            self.video_menu(ui);
-            ui.separator();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.news_menu(ui);
+                ui.separator();
+                ui.heading("Postgresql DB View And Migration");
+                self.db_menu(ui);
+                ui.separator();
+                ui.heading("Stream Video View");
+                self.stream_menu(ctx,ui);
+                ui.separator();
+                ui.heading("URL Video Down and View");
+                self.video_menu(ui);
+                ui.separator();
+                });
         })
     }}
 
@@ -46,21 +46,9 @@ fn main()->Result<(),eframe::Error>{
         {
             let mut app = MyApp::MyApp::new(_cc);
             let field = app.field.clone();
+            // use std::net::ToSocketAddrs;
+            // println!("{:?}", ("ityumhouse.com", 80).to_socket_addrs());
             app.fech_news();
-            // let config:MyApp::NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
-            // if let Ok(response) = api::NewsApi::new("kr", config.page_line, config.current_page).get_api(config.api_key){
-            //     let articles = response.articles();
-            //     for a in articles.iter(){
-            //         let (first,last) = a.publishedAt.split_at(10);
-            //         let news = NewsCardData{
-            //             title: a.title.to_string(),
-            //             url:a.url.to_string(),
-            //             publishedAt:first.to_string()
-            //         };
-            //         app.articles.push(news);
-            //     }
-            // }
-            // let field1 = app.articles.to_vec();
             thread::spawn(move || {
                 loop {
                     thread::sleep(Duration::from_secs(1));

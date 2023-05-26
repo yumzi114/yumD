@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "app","api",
+    "app","api","db_manager",
 ] 
 default-members = ["app"]
 [workspace.package]

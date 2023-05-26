@@ -1,5 +1,5 @@
 use std::error::Error;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use url::Url;
 extern crate dotenv;
@@ -17,7 +17,7 @@ pub struct NewsAPIResponse {
     status: String,
     pub totalResults:u32,
     articles: Vec<Article>,
-    code: Option<String>,
+    // code: Option<String>,
 }
 
 impl NewsAPIResponse {
@@ -32,12 +32,35 @@ pub struct Articles{
 }
 #[derive(Deserialize, Debug)]
 pub struct Article{
+    #[serde(deserialize_with="author_default")]
     author:String,
     pub title:String,
+    #[serde(deserialize_with="url_default")]
     pub url:String,
     // publishedat:String,
+    #[serde(deserialize_with="date_default")]
     pub publishedAt:String
 }
+fn author_default<'de, D>(d: D) -> Result<String, D::Error> where D: Deserializer<'de> {
+    Deserialize::deserialize(d)
+        .map(|x: Option<_>| {
+            x.unwrap_or("Noauthor".to_string())
+        })
+    }
+
+fn url_default<'de, D>(d: D) -> Result<String, D::Error> where D: Deserializer<'de> {
+    Deserialize::deserialize(d)
+        .map(|x: Option<_>| {
+            x.unwrap_or("NoUrl".to_string())
+        })
+    }
+fn date_default<'de, D>(d: D) -> Result<String, D::Error> where D: Deserializer<'de> {
+    Deserialize::deserialize(d)
+        .map(|x: Option<_>| {
+            x.unwrap_or("NoUrl".to_string())
+        })
+    }
+
 enum Country {
     Kr,
     Us
@@ -76,15 +99,20 @@ impl NewsApi{
         .push("top-headlines");
         let client = reqwest::Client::new();
         let resp = client
+            // .get(url)
             .request(reqwest::Method::GET, url)
             .query(&params)
             .header("User-Agent", APP_USER_AGENT)
             .header("Authorization",api_key)
+            // .send()
+            // .await?
+            // .json::<NewsAPIResponse>()
+            // .await?;
             .build()
             .map_err(|e| ApiError::AsyncRequestFailed(e))?;
         let response = client    
             .execute(resp)
-            .await.unwrap()
+            .await?
             .json::<NewsAPIResponse>()
             .await.map_err(|e| ApiError::AsyncRequestFailed(e))?;
         Ok(response)

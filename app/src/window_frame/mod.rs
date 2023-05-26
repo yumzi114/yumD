@@ -17,7 +17,6 @@ pub fn custom_window_frame(
     };
     CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
         let app_rect = ui.max_rect();
-
         let title_bar_height = 40.0;
         let title_bar_rect = {
             let mut rect = app_rect;
