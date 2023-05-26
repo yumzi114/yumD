@@ -35,7 +35,9 @@ pub struct NewsConfig{
 #[derive(Serialize, Deserialize,Default)]
 struct TwitchConfig{
     id:String,
-    password:String
+    password:String,
+    client_id:String,
+    client_secret:String
 }
 #[derive(Serialize, Deserialize,Default)]
 struct YoutubeConfig{
@@ -55,7 +57,9 @@ impl  TwitchConfig{
     fn new()->Self{
         Self { 
             id: String::new(),
-            password: String::new() 
+            password: String::new(),
+            client_id:String::new(),
+            client_secret:String::new()
         }
     }
 }
@@ -81,6 +85,8 @@ impl MyApp{
     pub fn new(cc: &eframe::CreationContext<'_>) -> MyApp {
         setup_custom_fonts(&cc.egui_ctx);
         let config: NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
+        let twitch_config:TwitchConfig = confy::load("yumd", "TwitchConfig").unwrap_or_default();
+        let youtube_config:YoutubeConfig = confy::load("yumd", "YoutubeConfig").unwrap_or_default();
         // let iter = (0..20).map(|a| NewsCardData {
         //     title: format!("title{}", a),
         // });
@@ -95,14 +101,15 @@ impl MyApp{
             articles: vec![],
             news_config:config,
             totalResults:0,
-            youtube_config:YoutubeConfig::new(),
-            twitch_config:TwitchConfig::new(),
+            youtube_config:youtube_config,
+            twitch_config:twitch_config,
             
             field: Arc::new(Mutex::new(0))    
         }
     }
     pub fn fech_news(&mut self){
             let config:NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
+            
             if let Ok(response) = api::NewsApi::new("kr", config.page_line, config.current_page).get_api(config.api_key){
                 self.totalResults=response.totalResults;
                 let articles = response.articles();
@@ -250,19 +257,31 @@ impl MyApp{
                 menu.show(ctx, |ui|{
                     ui.max_rect();
                     ui.horizontal_wrapped(|ui|{
-                        ui.label("ID                      : ");
+                        ui.label("ID                        : ");
                         ui.text_edit_singleline(&mut self.twitch_config.id);
                     });
                     ui.horizontal_wrapped(|ui|{
-                        ui.label("PASSWORD : ");
+                        ui.label("PASSWORD   : ");
                         // password::text_edit_singleline(&mut self.twitch_config.password);
                         let psw = egui::TextEdit::singleline(&mut self.twitch_config.password).password(true).show(ui);
+                    });
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("Client ID           : ");
+                        // password::text_edit_singleline(&mut self.twitch_config.password);
+                        let clientid = egui::TextEdit::singleline(&mut self.twitch_config.client_id).show(ui);
+                    });
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("Client Secret : ");
+                        // password::text_edit_singleline(&mut self.twitch_config.password);
+                        let clientsecret = egui::TextEdit::singleline(&mut self.twitch_config.client_secret).show(ui);
                     });
                     ui.vertical_centered(|ui|{
                         if ui.button("OK").clicked(){
                             if let Err(e)=confy::store("yumD", "TwitchConfig", TwitchConfig{
                                 id:self.twitch_config.id.to_string(),
-                                password:self.twitch_config.password.to_string()
+                                password:self.twitch_config.password.to_string(),
+                                client_id:self.twitch_config.client_id.to_string(),
+                                client_secret:self.twitch_config.client_secret.to_string()
                             }){
                                 tracing::error!("Failed saving Twitch:{}",e);
                             }
@@ -282,8 +301,16 @@ impl MyApp{
                     ui.horizontal_wrapped(|ui|{
                         ui.label("PASSWORD : ");
                         let psw = egui::TextEdit::singleline(&mut self.youtube_config.password).password(true).show(ui);
-                        // ui.text_edit_singleline(&mut self.youtube_config.password);
-                        
+                    });
+                    ui.vertical_centered(|ui|{
+                        if ui.button("OK").clicked(){
+                            if let Err(e)=confy::store("yumD", "YoutubeConfig", YoutubeConfig{
+                                id:self.twitch_config.id.to_string(),
+                                password:self.twitch_config.password.to_string()
+                            }){
+                                tracing::error!("Failed saving Twitch:{}",e);
+                            }
+                        };
                     });
                 });
             },

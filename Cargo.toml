@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "app","api","db_manager",
+    "yumD","api","db_manager",
 ] 
-default-members = ["app"]
+default-members = ["yumD"]
 [workspace.package]
 version = "0.0.1"
 edition = "2021"

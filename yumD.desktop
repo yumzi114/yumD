@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Exec=yumD
+Icon=Alacritty
+Categories=System;
+Name=yumD
+GenericName=Terminal
+Comment=my app
+
