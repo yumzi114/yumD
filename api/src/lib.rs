@@ -99,15 +99,10 @@ impl NewsApi{
         .push("top-headlines");
         let client = reqwest::Client::new();
         let resp = client
-            // .get(url)
             .request(reqwest::Method::GET, url)
             .query(&params)
             .header("User-Agent", APP_USER_AGENT)
             .header("Authorization",api_key)
-            // .send()
-            // .await?
-            // .json::<NewsAPIResponse>()
-            // .await?;
             .build()
             .map_err(|e| ApiError::AsyncRequestFailed(e))?;
         let response = client    
