@@ -1,5 +1,7 @@
 use super::MyInfo;
-use eframe::{egui::{self, Label, Sense}};
+use api::{TwitchToken,TwitchFollowRespone};
+use eframe::{egui::{self, Label, Sense, Spinner}};
+use std::process::{Command, Stdio};
 use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
 // use std::{sync::mpsc::channel, thread};
 use serde_derive::{Serialize, Deserialize};
@@ -19,12 +21,37 @@ pub struct  MyApp{
     open_win_name:String,
     open_win_code:String,
     pub articles: Vec<NewsCardData>,
+    tfollow_list: Vec<TwitchFollowInfo>,
     news_config:NewsConfig,
     youtube_config:YoutubeConfig,
     twitch_config:TwitchConfig,
     api_used:bool,
     totalResults:u32,
+    pub ttoken_time: Arc<Mutex<u64>>,
     pub field: Arc<Mutex<i128>>,
+    token:Token
+}
+struct Token{
+    twitch_id:String,
+    twitch_nick:String,
+    twitch_date:String,
+    twitch_token:String,
+    twitch_use:bool,
+    youtubu_token:String,
+    youtubu_use:bool,
+}
+impl Token{
+    fn new()->Self{
+        Self { 
+            twitch_id:String::new(),
+            twitch_nick:String::new(),
+            twitch_date:String::new(),
+            twitch_token: String::new(), 
+            twitch_use: false, 
+            youtubu_token: String::new(), 
+            youtubu_use: false 
+        }
+    }
 }
 #[derive(Serialize, Deserialize,Default)]
 pub struct NewsConfig{
@@ -81,6 +108,14 @@ pub struct NewsCardData {
     pub url:String,
     pub publishedAt:String
 }
+struct TwitchFollowInfo {
+    id_num:String,
+    id_str:String,
+    nick_name:String,
+    followed_at:String,
+    view:bool,
+    chat:bool,
+}
 impl MyApp{
     pub fn new(cc: &eframe::CreationContext<'_>) -> MyApp {
         setup_custom_fonts(&cc.egui_ctx);
@@ -103,13 +138,15 @@ impl MyApp{
             totalResults:0,
             youtube_config:youtube_config,
             twitch_config:twitch_config,
-            
-            field: Arc::new(Mutex::new(0))    
+            field: Arc::new(Mutex::new(0)),
+            token:Token::new(),
+            ttoken_time: Arc::new(Mutex::new(0)),
+            tfollow_list: vec![],
         }
+        
     }
     pub fn fech_news(&mut self){
             let config:NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
-            
             if let Ok(response) = api::NewsApi::new("kr", config.page_line, config.current_page).get_api(config.api_key){
                 self.totalResults=response.totalResults;
                 let articles = response.articles();
@@ -124,6 +161,27 @@ impl MyApp{
                 }
             };
     }
+    
+    pub fn twitch_login(&mut self){
+        let token = TwitchToken::new(
+            &self.twitch_config.client_id,
+            &self.twitch_config.client_secret,
+        );
+        match token {
+            Ok(mut token)=>{
+                self.token.twitch_token=token.access_token.clone();
+                let getlogin = token.user_login(&self.twitch_config.id, &self.token.twitch_token, &self.twitch_config.client_id).unwrap();
+                self.token.twitch_use=true;
+                self.token.twitch_id=getlogin.data[0].id.clone();
+                self.token.twitch_nick=getlogin.data[0].display_name.clone();
+                self.token.twitch_date=getlogin.data[0].created_at.clone();
+            },
+            Err(e)=>println!("{:?}",e)
+        }
+    }
+    // pub fn fech_twitch(&mut self){
+
+    // }
     fn fech_newsupdate(&mut self){
         self.articles.clear();
         if let Ok(response) = api::NewsApi::new("kr", self.news_config.page_line, self.news_config.current_page).get_api(self.news_config.api_key.to_string()){
@@ -140,7 +198,7 @@ impl MyApp{
         };
         }
     }
-    
+   
     pub fn render_sys(&mut self, ui: &mut Ui,ctx: &egui::Context){
         let my_system = MyInfo::MyInfo::new();
         ui.heading("Check System Files");
@@ -171,6 +229,8 @@ impl MyApp{
         ui.horizontal_wrapped(|ui|{
             ui.label("Second Thread Working time : ");
             ui.colored_label(GREEN,format!("{}",self.field.lock().unwrap()));
+            ui.label("Twitch Token Time : ");
+            ui.colored_label(GREEN,format!("{}",self.ttoken_time.lock().unwrap()));
         });
     }
     pub fn news_menu(&mut self, ui: &mut Ui){
@@ -250,10 +310,24 @@ impl MyApp{
                 ui.label(self.open_win_name.as_str());
             });
     }
+    fn new_chatting(&mut self, ctx: &egui::Context,){
+        for i in self.tfollow_list.iter_mut(){
+            let stream_id=i.id_str.clone();
+            // let mut temp = *i.chat.lock().unwrap();
+            let temp = egui::Window::new("Chattings").id(stream_id.into()).open(&mut i.chat).vscroll(true);
+                temp.show(ctx, |ui| {
+                    ui.max_rect();
+                });
+            
+
+        }
+        
+    }
     fn setting_menu(&mut self, ctx: &egui::Context){
         match &self.on_setting_menu {
             OpenSetting::twitch=>{
-                let menu = egui::Window::new("Twitch Settings").id("settingmenu".into()).open(&mut self.setting_menu_open);
+                if !self.token.twitch_use{
+                    let menu = egui::Window::new("Twitch Settings").id("settingmenu".into()).open(&mut self.setting_menu_open);
                 menu.show(ctx, |ui|{
                     ui.max_rect();
                     ui.horizontal_wrapped(|ui|{
@@ -268,12 +342,12 @@ impl MyApp{
                     ui.horizontal_wrapped(|ui|{
                         ui.label("Client ID           : ");
                         // password::text_edit_singleline(&mut self.twitch_config.password);
-                        let clientid = egui::TextEdit::singleline(&mut self.twitch_config.client_id).show(ui);
+                        let clientid = egui::TextEdit::singleline(&mut self.twitch_config.client_id).password(true).show(ui);
                     });
                     ui.horizontal_wrapped(|ui|{
                         ui.label("Client Secret : ");
                         // password::text_edit_singleline(&mut self.twitch_config.password);
-                        let clientsecret = egui::TextEdit::singleline(&mut self.twitch_config.client_secret).show(ui);
+                        let clientsecret = egui::TextEdit::singleline(&mut self.twitch_config.client_secret).password(true).show(ui);
                     });
                     ui.vertical_centered(|ui|{
                         if ui.button("OK").clicked(){
@@ -281,14 +355,55 @@ impl MyApp{
                                 id:self.twitch_config.id.to_string(),
                                 password:self.twitch_config.password.to_string(),
                                 client_id:self.twitch_config.client_id.to_string(),
-                                client_secret:self.twitch_config.client_secret.to_string()
-                            }){
+                                client_secret:self.twitch_config.client_secret.to_string(),
+                            }
+                            
+                        ){
                                 tracing::error!("Failed saving Twitch:{}",e);
+                            }
+                            // *self.twitch_login();
+                            let token = TwitchToken::new(
+                                &self.twitch_config.client_id,
+                                &self.twitch_config.client_secret,
+                            );
+                            match token {
+                                Ok(mut token)=>{
+                                    *self.ttoken_time.lock().unwrap()=token.expires_in;
+                                    self.token.twitch_token=token.access_token.clone();
+                                    let getlogin = token.user_login(&self.twitch_config.id, &self.token.twitch_token, &self.twitch_config.client_id).unwrap();
+                                    self.token.twitch_use=true;
+                                    self.token.twitch_id=getlogin.data[0].id.clone();
+                                    self.token.twitch_nick=getlogin.data[0].display_name.clone();
+                                    self.token.twitch_date=getlogin.data[0].created_at.clone();
+                                    let followlist = TwitchFollowRespone::twitch_get_follow(&self.token.twitch_id, &self.token.twitch_token, &self.twitch_config.client_id).unwrap();
+                                        for i in followlist{
+                                            let info = TwitchFollowInfo{
+                                                id_num:i.to_id,
+                                                id_str:i.to_login,
+                                                nick_name:i.to_name,
+                                                followed_at:i.followed_at,
+                                                view:false,
+                                                chat:false,
+                                            };
+                                            self.tfollow_list.push(info);
+                                        }
+                                },
+                                Err(e)=>println!("{:?}",e)
                             }
                         };
                     });
-                    
                 });
+                }else{
+                    let menu = egui::Window::new("Twitch Login Info").id("settingmenu".into()).open(&mut self.setting_menu_open);
+                    menu.show(ctx, |ui|{
+                        ui.label(RichText::new(&self.token.twitch_nick).color(Color32::from_rgb(110, 255, 110)));
+                        ui.label(RichText::new(&self.token.twitch_id).color(Color32::from_rgb(110, 255, 110)));
+                        ui.label(RichText::new(&self.token.twitch_date).color(Color32::from_rgb(110, 255, 110)));
+                        if ui.button("LOGOUT").clicked(){
+                            self.token.twitch_use=false;
+                        };
+                    });
+                }
             },
             OpenSetting::youtube=>{
                 let menu = egui::Window::new("Youtube Settings").id("settingmenu".into()).open(&mut self.setting_menu_open);
@@ -330,6 +445,10 @@ impl MyApp{
         );
     }
     pub fn stream_menu(&mut self, ctx: &egui::Context, ui: &mut Ui){
+        self.new_chatting(ctx);
+        if *self.ttoken_time.lock().unwrap()==0{
+            self.token.twitch_use=false;
+        };
         let mut stream_view = collaps_head("stream",ui);
         let stream_header_res = collaps_head_respone(ui,&mut stream_view,"show!");
         stream_view.show_body_indented(&stream_header_res.response, ui, |ui|{
@@ -338,14 +457,63 @@ impl MyApp{
                     self.on_setting_menu=OpenSetting::twitch;
                     self.setting_menu_open=!self.setting_menu_open;
                 };
+                if self.token.twitch_use {
+                    ui.label(RichText::new("ON").color(Color32::from_rgb(110, 255, 110)));
+                }
                 if ui.add(Label::new("Youtube").sense(Sense::click())).clicked() {
                     self.on_setting_menu=OpenSetting::youtube;
                     self.setting_menu_open=!self.setting_menu_open;
                 };
+                if self.token.youtubu_use {
+                    ui.label(RichText::new("ON").color(Color32::from_rgb(110, 255, 110)));
+                }
                 ui.label("(login api settings)");
-            });            
+            });
+            if self.token.twitch_use {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui|{
+                        egui::Grid::new("my_grid")
+                            .num_columns(5)
+                            .striped(true)
+                            .spacing([4.0, 4.0])
+                            .show(ui, |ui| {
+                                ui.label("ID");
+                                ui.label("NICK");
+                                ui.label("Live");
+                                ui.label("");
+                                ui.end_row();
+                                for  i in  self.tfollow_list.iter_mut(){
+                                    ui.label(i.id_str.to_string());
+                                    ui.label(i.nick_name.to_string());
+                                    if !i.view{
+                                        if ui.button("video").clicked(){
+                                            // i.view=true;
+                                            let temp = i.id_str.clone();
+                                            thread::spawn(move||{
+                                                Command::new("mpv")
+                                                .arg(format!("https://www.twitch.tv/{}",temp))
+                                                .status()
+                                                .unwrap();
+                                            });
+                                        };
+                                    }else{
+                                        ui.add(Spinner::new());
+                                    }
+                                    if ui.button("chat").clicked(){
+                                        i.chat=!i.chat;
+                                    };
+                                    ui.end_row();
+                                }
+                            });
+                    })
+                });
+                
+                
+                
+            }
         }
         );
+        
     }
     pub fn video_menu(&mut self, ui: &mut Ui){
         let mut video_down = collaps_head("downvideo",ui);

@@ -141,4 +141,109 @@ impl ToString for Country {
         }
     }
 }
-
+#[derive(Deserialize, Debug)]
+pub struct TwitchRespone{
+    pub data:Vec<TwitchInfo>
+}
+impl  TwitchRespone{
+    pub fn data(&self) -> &Vec<TwitchInfo> {
+        &self.data
+    }
+}
+#[derive(Deserialize, Debug)]
+pub struct TwitchInfo{
+    pub id:String,
+    login:String,
+    pub display_name:String,
+    pub created_at:String
+}
+#[derive(Deserialize, Debug)]
+pub struct TwitchToken{
+    pub access_token:String,
+    token_type:String,
+    pub expires_in:u64,
+    // client_id:String,
+    // client_secret:String,
+    // userid:String
+}
+#[derive(Deserialize, Debug)]
+pub struct  TwitchFollowRespone{
+    data:Vec<FollowInfo>
+}
+impl  TwitchFollowRespone{
+    pub fn data(&self) -> &Vec<FollowInfo> {
+        &self.data
+    }
+    #[tokio::main]
+    pub async fn twitch_get_follow(user_id:&str, token:&str, client_id:&str)->Result<Vec<FollowInfo>,TwitchError>{
+        let mut url: Result<Url, url::ParseError>=Url::parse("https://api.twitch.tv/helix/users/follows");
+        let params = [("from_id", user_id),("first","100")];
+        let client = reqwest::Client::new();
+        let resp=client
+            .request(reqwest::Method::GET, url.unwrap())
+            .query(&params)
+            .header("User-Agent","yumD")
+            .header("Authorization",format!("Bearer {}",token))
+            .header("Client-Id",client_id)
+            .send()
+            .await?
+            .json::<TwitchFollowRespone>()
+            .await.map_err(|e|TwitchError::TwitchFolowlistFailed("Fail Get Follow".to_string()))?;
+        // resp.data();
+        Ok(resp.data)
+    }
+}
+#[derive(Deserialize, Debug)]
+pub struct  FollowInfo{
+    pub to_id:String,
+    pub to_login:String,
+    pub to_name:String,
+    pub followed_at:String
+}
+#[derive(thiserror::Error, Debug)]
+pub enum TwitchError{
+    #[error("Twitch login failed")]
+    TwitchLoginFailed(#[from] reqwest::Error),
+    #[error("Twitch get follow list fail")]
+    TwitchFolowlistFailed(String),
+}
+impl TwitchToken{
+    #[tokio::main]
+    pub async fn new(client_id:&str,client_secret:&str)->Result<Self,TwitchError>{
+        let grant_type="client_credentials".to_string();
+        let params = [
+            ("client_id", client_id), 
+            ("client_secret", client_secret),  
+            ("grant_type", "client_credentials")];
+        let mut url: Result<Url, url::ParseError>=Url::parse("https://id.twitch.tv/oauth2/token");
+        let client = reqwest::Client::new();
+        let resp=client
+            .request(reqwest::Method::POST, url.unwrap())
+            .header("User-Agent", "yumD")
+            .query(&params)
+            .send()
+            .await?
+            .json::<TwitchToken>()
+            .await.map_err(|e|TwitchError::TwitchLoginFailed((e)))?;
+        Ok(resp)
+    }
+   
+    #[tokio::main]
+    pub async fn user_login(&mut self,user_id:&str,token:&str,client_id:&str)->Result<TwitchRespone,TwitchError>{
+        let mut url: Result<Url, url::ParseError>=Url::parse("https://api.twitch.tv/helix/users");
+        let params = [("login", user_id),];
+        let client = reqwest::Client::new();
+        let resp=client
+        .request(reqwest::Method::GET, url.unwrap())
+        .query(&params)
+        .header("User-Agent","yumD")
+        .header("Authorization",format!("Bearer {}",token))
+        .header("Client-Id",client_id)
+        .send()
+        .await?
+        .json::<TwitchRespone>()
+        .await?;
+    // let data = resp.data[0].;
+    Ok(resp)
+    }
+}

@@ -1,5 +1,6 @@
 #!/bin/sh
 cargo build -r
+sudo rm -rf /usr/bin/yumD
 sudo cp target/release/yumD /usr/bin/ 
 echo "Build and binary file Copy Done"
 sudo cp yumD.desktop /usr/share/applications/
