@@ -1,7 +1,9 @@
 use super::MyInfo;
 use api::{TwitchToken,TwitchFollowRespone};
+use diesel::sql_types::Array;
 use eframe::{egui::{self, Label, Sense, Spinner}};
-use std::process::{Command, Stdio};
+use std::{sync::atomic::{AtomicBool, Ordering} };
+use std::{process::{Command, Stdio}, sync::mpsc::{Sender,Receiver},};
 use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
 // use std::{sync::mpsc::channel, thread};
 use serde_derive::{Serialize, Deserialize};
@@ -10,6 +12,7 @@ use std::{
     thread,
     time::Duration,
 };
+
 
 const BLUE: Color32 = Color32::from_rgb(123, 180, 255);
 const GREEN: Color32 = Color32::from_rgb(110, 255, 110);
@@ -29,7 +32,9 @@ pub struct  MyApp{
     totalResults:u32,
     pub ttoken_time: Arc<Mutex<u64>>,
     pub field: Arc<Mutex<i128>>,
-    token:Token
+    token:Token,
+    down_option:DownOption,
+    down_history:Vec<DownOption>
 }
 struct Token{
     twitch_id:String,
@@ -108,14 +113,94 @@ pub struct NewsCardData {
     pub url:String,
     pub publishedAt:String
 }
+
+#[derive(Debug,Clone)]
+struct DownOption{
+    quality:bool,
+    sublang:bool,
+    download_dir:String,
+    download_url:String,
+    is_start:bool,
+    is_done:bool,
+    is_fail:bool
+}
+impl DownOption {
+    fn new()->Self{
+        return Self{
+            quality:true,
+            sublang:false,
+            download_dir:"/home/yum/Download".to_string(),
+            download_url:String::new(),
+            is_start:false,
+            is_done:false,
+            is_fail:false,
+        };
+    }
+    fn get(&mut self){
+        
+        let mut args: Vec<String>=Vec::new();
+        if self.quality {
+            args.push("-f bestvideo+bestaudio".to_string());
+            // args.push("".to_string());
+        }
+        if self.sublang {
+            args.push("--write-auto-subs".to_string());
+            args.push("--sub-lang ko".to_string());
+        }
+        args.push(self.download_url.to_string());
+        self.is_start=true;
+        let download =thread::spawn(move||{
+            Command::new("yt-dlp")
+            .args(args)
+            // .arg(format!("https://www.twitch.tv/{}",temp))
+            .status()
+            .unwrap();
+        });
+        match download.join() {
+            Ok(_)=>{
+                self.is_done=true;
+                self.is_start=false;
+            },
+            Err(_)=>self.is_fail=true
+        }
+    }
+}
+
 struct TwitchFollowInfo {
     id_num:String,
     id_str:String,
     nick_name:String,
     followed_at:String,
-    view:bool,
+    view_on:Arc<AtomicBool>,
     chat:bool,
 }
+impl TwitchFollowInfo {
+    fn view_open (&mut self){
+        let temp = self.id_str.clone();
+        let video_status = Arc::clone(&self.view_on);
+        let videoview =thread::spawn(move||{
+        let video =Command::new("mpv")
+        .arg(format!("https://www.twitch.tv/{}",temp))
+        .status();
+        match video {
+            Ok(status)=>{
+                match status.code() {
+                    Some(0)=>(*video_status).store(false,Ordering::Relaxed),
+                    Some(2)=>(*video_status).store(false,Ordering::Relaxed),
+                    Some(_)=>println!("error"),
+                    None=>println!("error")
+                }
+            },
+            Err(_)=>{
+                println!("에에에에러러ㅓ")
+                // self.view=false;
+            }
+        }
+        });
+        
+    }
+}
+
 impl MyApp{
     pub fn new(cc: &eframe::CreationContext<'_>) -> MyApp {
         setup_custom_fonts(&cc.egui_ctx);
@@ -142,6 +227,8 @@ impl MyApp{
             token:Token::new(),
             ttoken_time: Arc::new(Mutex::new(0)),
             tfollow_list: vec![],
+            down_option:DownOption::new(),
+            down_history:Vec::new(),
         }
         
     }
@@ -179,9 +266,6 @@ impl MyApp{
             Err(e)=>println!("{:?}",e)
         }
     }
-    // pub fn fech_twitch(&mut self){
-
-    // }
     fn fech_newsupdate(&mut self){
         self.articles.clear();
         if let Ok(response) = api::NewsApi::new("kr", self.news_config.page_line, self.news_config.current_page).get_api(self.news_config.api_key.to_string()){
@@ -278,9 +362,6 @@ impl MyApp{
                             ui.colored_label(GREEN,i.publishedAt.as_str());
                         });
                     };
-                    // ui.vertical_centered(|ui| {
-                        
-                    // });
                 });
             }else {
                 ui.horizontal_wrapped(|ui|{
@@ -294,7 +375,6 @@ impl MyApp{
                         }){
                             tracing::error!("Failed saving app state:{}",e);
                         }
-                        // self.api_used=true;
                         tracing::error!("api key set");
                     }
                 });
@@ -303,7 +383,6 @@ impl MyApp{
     }
     pub fn new_windows(&mut self, ctx: &egui::Context){
         let temp = egui::Window::new("Code View").id("code".into()).open(&mut self.has_next).vscroll(true);
-            // let temp = egui::Window::new("My Window").id("ttt".into()).open(&mut self.has_next);
             temp.show(ctx, |ui| {
                 ui.max_rect();
                 ui.code_editor(&mut self.open_win_code);
@@ -313,15 +392,11 @@ impl MyApp{
     fn new_chatting(&mut self, ctx: &egui::Context,){
         for i in self.tfollow_list.iter_mut(){
             let stream_id=i.id_str.clone();
-            // let mut temp = *i.chat.lock().unwrap();
             let temp = egui::Window::new("Chattings").id(stream_id.into()).open(&mut i.chat).vscroll(true);
                 temp.show(ctx, |ui| {
                     ui.max_rect();
                 });
-            
-
         }
-        
     }
     fn setting_menu(&mut self, ctx: &egui::Context){
         match &self.on_setting_menu {
@@ -336,12 +411,10 @@ impl MyApp{
                     });
                     ui.horizontal_wrapped(|ui|{
                         ui.label("PASSWORD   : ");
-                        // password::text_edit_singleline(&mut self.twitch_config.password);
                         let psw = egui::TextEdit::singleline(&mut self.twitch_config.password).password(true).show(ui);
                     });
                     ui.horizontal_wrapped(|ui|{
                         ui.label("Client ID           : ");
-                        // password::text_edit_singleline(&mut self.twitch_config.password);
                         let clientid = egui::TextEdit::singleline(&mut self.twitch_config.client_id).password(true).show(ui);
                     });
                     ui.horizontal_wrapped(|ui|{
@@ -376,17 +449,17 @@ impl MyApp{
                                     self.token.twitch_nick=getlogin.data[0].display_name.clone();
                                     self.token.twitch_date=getlogin.data[0].created_at.clone();
                                     let followlist = TwitchFollowRespone::twitch_get_follow(&self.token.twitch_id, &self.token.twitch_token, &self.twitch_config.client_id).unwrap();
-                                        for i in followlist{
-                                            let info = TwitchFollowInfo{
-                                                id_num:i.to_id,
-                                                id_str:i.to_login,
-                                                nick_name:i.to_name,
-                                                followed_at:i.followed_at,
-                                                view:false,
-                                                chat:false,
-                                            };
-                                            self.tfollow_list.push(info);
-                                        }
+                                    for i in followlist{  
+                                        let info = TwitchFollowInfo{
+                                            id_num:i.to_id,
+                                            id_str:i.to_login,
+                                            nick_name:i.to_name,
+                                            followed_at:i.followed_at,
+                                            view_on:Arc::new(AtomicBool::new(false)),
+                                            chat:false,
+                                        };
+                                        self.tfollow_list.push(info);
+                                    }
                                 },
                                 Err(e)=>println!("{:?}",e)
                             }
@@ -401,6 +474,7 @@ impl MyApp{
                         ui.label(RichText::new(&self.token.twitch_date).color(Color32::from_rgb(110, 255, 110)));
                         if ui.button("LOGOUT").clicked(){
                             self.token.twitch_use=false;
+                            *self.ttoken_time.lock().unwrap()=0;
                         };
                     });
                 }
@@ -485,16 +559,11 @@ impl MyApp{
                                 for  i in  self.tfollow_list.iter_mut(){
                                     ui.label(i.id_str.to_string());
                                     ui.label(i.nick_name.to_string());
-                                    if !i.view{
+                                    let video_status: Arc<AtomicBool> = Arc::clone(&i.view_on);
+                                    if !(*video_status).load(Ordering::Relaxed){
                                         if ui.button("video").clicked(){
-                                            // i.view=true;
-                                            let temp = i.id_str.clone();
-                                            thread::spawn(move||{
-                                                Command::new("mpv")
-                                                .arg(format!("https://www.twitch.tv/{}",temp))
-                                                .status()
-                                                .unwrap();
-                                            });
+                                            (*video_status).store(true,Ordering::Relaxed);
+                                            i.view_open();
                                         };
                                     }else{
                                         ui.add(Spinner::new());
@@ -507,9 +576,6 @@ impl MyApp{
                             });
                     })
                 });
-                
-                
-                
             }
         }
         );
@@ -518,9 +584,48 @@ impl MyApp{
     pub fn video_menu(&mut self, ui: &mut Ui){
         let mut video_down = collaps_head("downvideo",ui);
         let video_down_res = collaps_head_respone(ui,&mut video_down,"show!");
-        video_down.show_body_indented(&video_down_res.response, ui, |ui| 
-            ui.label("Body")
-        );
+        video_down.show_body_indented(&video_down_res.response, ui, |ui|{
+            ui.horizontal_wrapped(|ui|{
+                ui.label("Working Dir : ");
+                ui.label(self.down_option.download_dir.to_string());
+                if ui.button("choose").clicked(){
+                    if let Some(path)=rfd::FileDialog::new().set_directory(self.down_option.download_dir.to_string()).pick_folder(){
+                        self.down_option.download_dir=path.display().to_string();
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui|{
+                ui.checkbox(&mut self.down_option.quality, "Quality");
+                ui.checkbox(&mut self.down_option.sublang, "한글자막");
+                ui.label("URL : ");
+                ui.text_edit_singleline(&mut self.down_option.download_url);
+                if ui.button("Get").clicked(){
+                    self.down_option.is_start=true;
+                    // self.down_option.get();
+                    self.down_history.push(self.down_option.clone());
+                };
+            });
+            ui.add_space(5.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.horizontal_wrapped(|ui|{
+                    egui::Grid::new("down_history")
+                    .num_columns(5)
+                    .striped(true)
+                    .spacing([4.0, 4.0])
+                    .show(ui, |ui| {
+                        for item in self.down_history.iter() {
+                            ui.label(item.download_url.to_string());
+                            if item.is_start && !item.is_done{
+                                ui.add(Spinner::new());
+                            }
+                            if !item.is_start &&item.is_done {
+                                ui.button("Open");
+                            }
+                        }
+                    })
+                })
+            })
+        });
     }
 }
 
