@@ -35,7 +35,10 @@ impl MyInfo{
                 System::new("/etc/systemd/system.conf","system.conf"),
                 System::new("/etc/pacman.conf","pacman"),
                 System::new("/bin/yay","yay"),
-                System::new("/etc/modprobe.d/vfio.conf","vfio")
+                System::new("/etc/modprobe.d/vfio.conf","vfio"),
+                System::new("/home/yum/.bashrc","bash"),
+                System::new("/home/yum/.zshrc","zsh")
+
                 ]
         }
     }

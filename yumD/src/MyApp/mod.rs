@@ -1,7 +1,10 @@
 use super::MyInfo;
 use api::{TwitchToken,TwitchFollowRespone};
+use twitch_irc::{ClientConfig, SecureTCPTransport, login::StaticLoginCredentials, TwitchIRCClient, message::ServerMessage};
 use diesel::sql_types::Array;
-use eframe::{egui::{self, Label, Sense, Spinner}};
+use tokio::time::{sleep, Duration};
+use eframe::{egui::{self, Label, Sense, Spinner}, emath::Align};
+
 use std::{sync::atomic::{AtomicBool, Ordering} };
 use std::{process::{Command, Stdio}, sync::mpsc::{Sender,Receiver},};
 use egui::{RichText,Color32,collapsing_header::CollapsingState,InnerResponse,Ui,Response,ScrollArea};
@@ -10,7 +13,6 @@ use serde_derive::{Serialize, Deserialize};
 use std::{
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
 
 
@@ -25,6 +27,7 @@ pub struct  MyApp{
     open_win_code:String,
     pub articles: Vec<NewsCardData>,
     tfollow_list: Vec<TwitchFollowInfo>,
+    chatting_layer:Option<ChattingLayer>,
     news_config:NewsConfig,
     youtube_config:YoutubeConfig,
     twitch_config:TwitchConfig,
@@ -35,6 +38,10 @@ pub struct  MyApp{
     token:Token,
     down_option:DownOption,
     down_history:Vec<DownOption>
+}
+enum ChattingLayer{
+    TEXT,
+    DATA
 }
 struct Token{
     twitch_id:String,
@@ -120,9 +127,7 @@ struct DownOption{
     sublang:bool,
     download_dir:String,
     download_url:String,
-    is_start:bool,
-    is_done:bool,
-    is_fail:bool
+    
 }
 impl DownOption {
     fn new()->Self{
@@ -131,41 +136,64 @@ impl DownOption {
             sublang:false,
             download_dir:"/home/yum/Download".to_string(),
             download_url:String::new(),
-            is_start:false,
-            is_done:false,
-            is_fail:false,
+           
         };
     }
-    fn get(&mut self){
+    // fn get(&mut self){
         
-        let mut args: Vec<String>=Vec::new();
-        if self.quality {
-            args.push("-f bestvideo+bestaudio".to_string());
-            // args.push("".to_string());
+    //     let mut args: Vec<String>=Vec::new();
+    //     if self.quality {
+    //         args.push("-f bestvideo+bestaudio".to_string());
+    //         // args.push("".to_string());
+    //     }
+    //     if self.sublang {
+    //         args.push("--write-auto-subs".to_string());
+    //         args.push("--sub-lang ko".to_string());
+    //     }
+    //     args.push(self.download_url.to_string());
+    //     self.is_start=true;
+    //     let download =thread::spawn(move||{
+    //         Command::new("yt-dlp")
+    //         .args(args)
+    //         // .arg(format!("https://www.twitch.tv/{}",temp))
+    //         .status()
+    //         .unwrap();
+    //     });
+    //     match download.join() {
+    //         Ok(_)=>{
+    //             self.is_done=true;
+    //             self.is_start=false;
+    //         },
+    //         Err(_)=>self.is_fail=true
+    //     }
+    // }
+}
+#[derive(Debug)]
+struct TwitchMessage{
+    client_nonce:String,
+    tmi_sent_ts:String,
+    server_timestamp:String,
+    sender_name:String,
+    sender_id:String,
+    sender_login:String,
+    text:String,
+}
+impl TwitchMessage {
+    fn new()->Self{
+        return  Self 
+        { 
+            client_nonce: String::new(), 
+            tmi_sent_ts:String::new(),
+            server_timestamp:String::new(),
+            sender_name:String::new(),
+            sender_id:String::new(),
+            sender_login:String::new(),
+            text:String::new()
         }
-        if self.sublang {
-            args.push("--write-auto-subs".to_string());
-            args.push("--sub-lang ko".to_string());
-        }
-        args.push(self.download_url.to_string());
-        self.is_start=true;
-        let download =thread::spawn(move||{
-            Command::new("yt-dlp")
-            .args(args)
-            // .arg(format!("https://www.twitch.tv/{}",temp))
-            .status()
-            .unwrap();
-        });
-        match download.join() {
-            Ok(_)=>{
-                self.is_done=true;
-                self.is_start=false;
-            },
-            Err(_)=>self.is_fail=true
-        }
+
     }
 }
-
+#[derive(Clone)]
 struct TwitchFollowInfo {
     id_num:String,
     id_str:String,
@@ -173,32 +201,99 @@ struct TwitchFollowInfo {
     followed_at:String,
     view_on:Arc<AtomicBool>,
     chat:bool,
+    chat_on:Arc<AtomicBool>,
+    
+    message_list:Arc<Mutex<Vec<TwitchMessage>>>
 }
+
 impl TwitchFollowInfo {
     fn view_open (&mut self){
         let temp = self.id_str.clone();
         let video_status = Arc::clone(&self.view_on);
         let videoview =thread::spawn(move||{
-        let video =Command::new("mpv")
-        .arg(format!("https://www.twitch.tv/{}",temp))
-        .status();
-        match video {
-            Ok(status)=>{
-                match status.code() {
-                    Some(0)=>(*video_status).store(false,Ordering::Relaxed),
-                    Some(2)=>(*video_status).store(false,Ordering::Relaxed),
-                    Some(_)=>println!("error"),
-                    None=>println!("error")
+            let video =Command::new("mpv")
+            .arg(format!("https://www.twitch.tv/{}",temp))
+            .status();
+            match video {
+                Ok(status)=>{
+                    match status.code() {
+                        Some(0)=>(*video_status).store(false,Ordering::Relaxed),
+                        Some(2)=>(*video_status).store(false,Ordering::Relaxed),
+                        Some(_)=>println!("error"),
+                        None=>println!("error")
+                    }
+                },
+                Err(_)=>{
+                    println!("에에에에러러ㅓ")
+                    // self.view=false;
                 }
-            },
-            Err(_)=>{
-                println!("에에에에러러ㅓ")
-                // self.view=false;
             }
-        }
         });
-        
     }
+    #[tokio::main]
+    pub async fn get_chatting(&mut self){
+        let chat_status = Arc::clone(&self.chat_on);
+        let messagelist = Arc::clone(&mut self.message_list);
+        let config = ClientConfig::default();
+        let (mut incoming_messages, client) =
+        TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);
+        let join_handle = tokio::spawn(async move {
+            while (*chat_status).load(Ordering::Relaxed) {
+                sleep(Duration::from_millis(1)).await;
+                if let Some(message) = incoming_messages.try_recv().ok(){
+                    let mut sendmsg = TwitchMessage::new();
+                    match message {
+                        ServerMessage::Privmsg(msg) => {
+                            if let Some(clientnonce)=msg.source.tags.0.get("client-nonce"){
+                                let temp = clientnonce.clone();
+                                sendmsg.client_nonce=temp.unwrap();
+                            }
+                            if let Some(tmisent)=msg.source.tags.0.get("tmi-sent-ts"){
+                                let temp = tmisent.clone();
+                                sendmsg.tmi_sent_ts=temp.unwrap();
+                            }
+                            sendmsg.text=msg.message_text;
+                            sendmsg.sender_login=msg.sender.login;
+                            sendmsg.sender_id=msg.sender.id;
+                            sendmsg.sender_name=msg.sender.name;
+                            sendmsg.server_timestamp=msg.server_timestamp.to_string();
+                            // println!("{:?}",sendmsg);
+                            messagelist.lock().unwrap().push(sendmsg);
+                        },
+                        ServerMessage::Whisper(msg) => {
+                            if let Some(clientnonce)=msg.source.tags.0.get("client-nonce"){
+                                let temp = clientnonce.clone();
+                                sendmsg.client_nonce=temp.unwrap();
+                            }
+                            if let Some(tmisent)=msg.source.tags.0.get("tmi-sent-ts"){
+                                let temp = tmisent.clone();
+                                sendmsg.tmi_sent_ts=temp.unwrap();
+                            }
+                            sendmsg.text=msg.message_text;
+                            sendmsg.sender_login=msg.sender.login;
+                            sendmsg.sender_id=msg.sender.id;
+                            sendmsg.sender_name=msg.sender.name;
+                            // sendmsg.server_timestamp=msg.server_timestamp.to_string();
+                            // println!("{:?}",sendmsg);
+                            messagelist.lock().unwrap().push(sendmsg);
+                            // println!("(w) {}: {}{:?}", msg.sender.name, msg.message_text,msg.source.tags.0);
+                        },
+                        _ => {}
+                    }
+                };
+                // println!("{:?}",(*chat_status).load(Ordering::Relaxed));
+                // match  incoming_messages.try_recv().ok(){
+                //     Some(message)=>{
+                //         println!("{:?}",message);
+                //     },
+                //     None=>{}
+                // }
+            }
+        });
+        client.join(self.id_str.to_owned()).unwrap();
+        join_handle.await.unwrap();
+    }
+    
 }
 
 impl MyApp{
@@ -207,9 +302,6 @@ impl MyApp{
         let config: NewsConfig = confy::load("yumd", "yumdconfig").unwrap_or_default();
         let twitch_config:TwitchConfig = confy::load("yumd", "TwitchConfig").unwrap_or_default();
         let youtube_config:YoutubeConfig = confy::load("yumd", "YoutubeConfig").unwrap_or_default();
-        // let iter = (0..20).map(|a| NewsCardData {
-        //     title: format!("title{}", a),
-        // });
         MyApp { 
             date: false, 
             setting_menu_open:false,
@@ -220,6 +312,7 @@ impl MyApp{
             open_win_code:String::new(), 
             articles: vec![],
             news_config:config,
+            chatting_layer:Some(ChattingLayer::DATA),
             totalResults:0,
             youtube_config:youtube_config,
             twitch_config:twitch_config,
@@ -228,7 +321,7 @@ impl MyApp{
             ttoken_time: Arc::new(Mutex::new(0)),
             tfollow_list: vec![],
             down_option:DownOption::new(),
-            down_history:Vec::new(),
+            down_history:vec![],
         }
         
     }
@@ -391,10 +484,60 @@ impl MyApp{
     }
     fn new_chatting(&mut self, ctx: &egui::Context,){
         for i in self.tfollow_list.iter_mut(){
-            let stream_id=i.id_str.clone();
-            let temp = egui::Window::new("Chattings").id(stream_id.into()).open(&mut i.chat).vscroll(true);
+            if !i.chat{
+                (*i.chat_on).store(i.chat,Ordering::Relaxed);
+            }
+            // (*i.chat_on).store(i.chat,Ordering::Relaxed);
+            // println!("{:?}",(*i.chat_on).load(Ordering::Relaxed));
+            let mut item=i.clone();
+            let temp = egui::Window::new("Chattings").id(item.id_str.to_string().into()).open(&mut i.chat).vscroll(true);
                 temp.show(ctx, |ui| {
-                    ui.max_rect();
+                    let menu =ui.horizontal_top(|ui|{
+                        ui.label("Text Layer : ");
+                        if ui.button("TEXT").clicked(){
+                            self.chatting_layer=Some(ChattingLayer::TEXT);
+                            // let mut temp = item.clone();
+                            
+                        };
+                        if ui.button("DATA").clicked(){
+                            self.chatting_layer=Some(ChattingLayer::DATA);
+                        };
+                    });
+                    
+                    ui.separator();
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for sendmsg in &*i.message_list.lock().unwrap(){
+                            ui.horizontal_wrapped(|ui|{
+                                match self.chatting_layer {
+                                    Some(ChattingLayer::TEXT)=>{
+                                        ui.label(format!("{} : ",sendmsg.sender_name.to_string()));
+                                        ui.label(sendmsg.text.to_string());
+                                    },
+                                    Some(ChattingLayer::DATA)=>{
+                                        ui.label(format!("{},{},{},{},{},{},{} ",
+                                        sendmsg.sender_name.to_string(),
+                                        sendmsg.sender_id.to_string(),
+                                        sendmsg.sender_login.to_string(),
+                                        sendmsg.client_nonce.to_string(), 
+                                        sendmsg.tmi_sent_ts.to_string(), 
+                                        sendmsg.server_timestamp.to_string(),
+                                        sendmsg.text.to_string(), 
+                                    ));
+                                    },
+                                    None=>{}
+                                }
+                                
+                            });
+                        }
+                        // egui::ScrollArea::vertical().show(ui, |ui| {
+                            
+                        // });
+                        ui.label("");
+                        ui.scroll_to_cursor(Some(Align::BOTTOM));
+                    });
+                    
+                    ui.separator();
+                    
                 });
         }
     }
@@ -430,7 +573,6 @@ impl MyApp{
                                 client_id:self.twitch_config.client_id.to_string(),
                                 client_secret:self.twitch_config.client_secret.to_string(),
                             }
-                            
                         ){
                                 tracing::error!("Failed saving Twitch:{}",e);
                             }
@@ -457,6 +599,8 @@ impl MyApp{
                                             followed_at:i.followed_at,
                                             view_on:Arc::new(AtomicBool::new(false)),
                                             chat:false,
+                                            chat_on:Arc::new(AtomicBool::new(false)),
+                                            message_list:Arc::new( Mutex::new(Vec::new())),
                                         };
                                         self.tfollow_list.push(info);
                                     }
@@ -559,18 +703,30 @@ impl MyApp{
                                 for  i in  self.tfollow_list.iter_mut(){
                                     ui.label(i.id_str.to_string());
                                     ui.label(i.nick_name.to_string());
-                                    let video_status: Arc<AtomicBool> = Arc::clone(&i.view_on);
-                                    if !(*video_status).load(Ordering::Relaxed){
+                                    // let video_status: Arc<AtomicBool> = Arc::clone(&i.view_on);
+                                    if !(*i.view_on).load(Ordering::Relaxed){
                                         if ui.button("video").clicked(){
-                                            (*video_status).store(true,Ordering::Relaxed);
+                                            (*i.view_on).store(true,Ordering::Relaxed);
                                             i.view_open();
                                         };
                                     }else{
                                         ui.add(Spinner::new());
                                     }
-                                    if ui.button("chat").clicked(){
-                                        i.chat=!i.chat;
-                                    };
+                                    if !(*i.chat_on).load(Ordering::Relaxed){
+                                        if ui.button("chat").clicked(){
+                                            i.chat=!i.chat;
+                                            (*i.chat_on).store(i.chat,Ordering::Relaxed);
+                                            if i.chat{
+                                                // i.get_chatting();
+                                                let mut temp = i.clone();
+                                                thread::spawn(move||{
+                                                    temp.get_chatting();
+                                                });
+                                            }
+                                        };
+                                    }else{
+                                        ui.add(Spinner::new());
+                                    }
                                     ui.end_row();
                                 }
                             });
@@ -600,31 +756,69 @@ impl MyApp{
                 ui.label("URL : ");
                 ui.text_edit_singleline(&mut self.down_option.download_url);
                 if ui.button("Get").clicked(){
-                    self.down_option.is_start=true;
+                    
                     // self.down_option.get();
                     self.down_history.push(self.down_option.clone());
                 };
             });
-            ui.add_space(5.0);
+            // ui.add_space(5.0);
+            // ui.wrap_text();
+            // ui.label("text");
+            // ui.wrap_text();
+            // ui.label("text");
+            // ui.vertical(|ui| {
+            //     ui.label("over");
+            //     ui.label("under");
+            // });
+            // ui.columns(2, |columns| {
+            //     columns[0].label("First column");
+            //     columns[1].label("Second column");
+            // });
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.horizontal_wrapped(|ui|{
                     egui::Grid::new("down_history")
-                    .num_columns(5)
-                    .striped(true)
-                    .spacing([4.0, 4.0])
+                    // .with_row_color(GREEN)
+                    // .num_columns(1)
+                    // .striped(true)
+                    // .spacing([4.0, 4.0])
                     .show(ui, |ui| {
                         for item in self.down_history.iter() {
+                            ui.label("URL : ");
                             ui.label(item.download_url.to_string());
-                            if item.is_start && !item.is_done{
-                                ui.add(Spinner::new());
-                            }
-                            if !item.is_start &&item.is_done {
-                                ui.button("Open");
-                            }
+                            ui.horizontal(|ui|{
+                                let dellist = ui.small_button(RichText::new("🗑").size(15.))
+                                .on_hover_text("delete from list");
+                                let opendir = ui.small_button(RichText::new("📂").size(15.))
+                                .on_hover_text("open folder");
+                            });
+                            ui.menu_button("My menu", |ui| {
+                                ui.menu_button("My sub-menu", |ui| {
+                                    if ui.button("Close the menu").clicked() {
+                                        ui.close_menu();
+                                    }
+                                });
+                            });
+                            
+                            ui.end_row();
                         }
                     })
                 })
             })
+            // egui::Grid::new("some_unique_id").show(ui, |ui| {
+                
+            //     ui.label("First row, first column");
+            //     ui.label("First row, second column");
+            //     ui.end_row();
+            
+            //     ui.label("Second row, first column");
+            //     ui.label("Second row, second column");
+            //     ui.label("Second row, third column");
+            //     ui.end_row();
+            
+            //     ui.horizontal(|ui| { ui.label("Same"); ui.label("cell"); });
+            //     ui.label("Third row, second column");
+            //     ui.end_row();
+            // });
         });
     }
 }

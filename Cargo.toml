@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "yumD","api","db_manager",
+    "yumD","api",
 ] 
 default-members = ["yumD"]
 [workspace.package]

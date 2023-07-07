@@ -2,6 +2,7 @@ use std::error::Error;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use url::Url;
+
 extern crate dotenv;
 
 use dotenv::dotenv;
@@ -45,7 +46,7 @@ fn author_default<'de, D>(d: D) -> Result<String, D::Error> where D: Deserialize
     Deserialize::deserialize(d)
         .map(|x: Option<_>| {
             x.unwrap_or("Noauthor".to_string())
-        })
+       })
     }
 
 fn url_default<'de, D>(d: D) -> Result<String, D::Error> where D: Deserializer<'de> {
